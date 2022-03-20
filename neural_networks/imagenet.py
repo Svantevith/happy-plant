@@ -14,7 +14,6 @@ from keras.preprocessing.image import img_to_array
 tf.compat.v1.ConfigProto().gpu_options.allow_growth = True
 tf.config.run_functions_eagerly(False)
 
-
 class IHappyPlant:
     LABELS_PATH = r'D:\PyCharm Professional\Projects\HappyPlant\data\models\labels\happy_plant_labels.pickle'
     MODELS_DIRECTORY = r'D:\PyCharm Professional\Projects\HappyPlant\data\models\MobileNetV2'

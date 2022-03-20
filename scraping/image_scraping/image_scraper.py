@@ -66,7 +66,7 @@ def get_text_from_image(img_buffer: str) -> list:
     boxed_img = img_threshold.copy()
     for i in range(total_boxes):
         # Confidence should be generally between 30-40%
-        if int(details['conf'][i]) >= 30:
+        if float(details['conf'][i]) >= 30:
             x, y, w, h = (
                 details['left'][i],
                 details['top'][i],
@@ -82,14 +82,17 @@ def get_text_from_image(img_buffer: str) -> list:
     words = []
     last_word = ''
     for word in details['text']:
+        word = word.strip()
         if re.search('\\w+', word):
             words.append(word)
             last_word = word
-        if (words and last_word and not word) or (word == details['text'][-1]):
-            parsed_lines.append(words)
-            words = []
 
-    return [' '.join(line) for line in parsed_lines if line]
+        if (words and last_word and not word) or (word == details['text'][-1]):
+            if words:
+                parsed_lines.append(' '.join(words))
+                words = []
+
+    return parsed_lines
 
 
 def get_data_from_image(img_buffer: str) -> pd.DataFrame:
@@ -112,14 +115,30 @@ def get_data_from_image(img_buffer: str) -> pd.DataFrame:
     headers = ['Disease', 'Reason', 'Symptoms', 'Treatment']
     lines = get_text_from_image(img_buffer)
     data = {k: [] for k in headers}
-    for i, label in enumerate(labels):
-        idx_prev = lines.index(label)
-        try:
-            idx_next = lines.index(labels[i + 1])
-        except IndexError:
-            idx_next = len(lines)
-        disease = [line for line in lines[idx_prev:idx_next]]
-        fields = [-1] + [i for i, line in enumerate(disease) if line.startswith('WHAT')] + [len(disease)]
-        for k, field in enumerate(fields[:-1]):
-            data[headers[k]].append(' '.join(disease[field + 1: fields[k + 1]]))
+
+    text = []
+    idx = 0
+
+    def add_disease(index: int):
+        col = headers[index]
+        data[col].append(' '.join(text))
+
+    for i, line in enumerate(lines):
+        if any(label == line for label in labels):
+            if idx == 3:
+                add_disease(idx)
+            text = [line, ]
+            idx = 0
+
+        elif line.startswith('WHAT'):
+            add_disease(idx)
+            text = []
+            idx += 1
+
+        else:
+            text.append(line)
+
+        if i == len(lines) - 1:
+            add_disease(-1)
+
     return pd.DataFrame.from_dict(data)

@@ -2,13 +2,15 @@ import os
 import re
 from datetime import datetime
 from typing import NoReturn, Union
+from dotenv import load_dotenv
 
+import sqlite3
 import numpy as np
 import pandas as pd
 from PIL import UnidentifiedImageError
 
 from neural_networks.imagenet import IHappyPlant
-from scraping.export_excel.export_excel import save_excel
+from helper_scripts.export_excel import save_excel
 from scraping.image_scraping.image_scraper import get_data_from_image
 from scraping.web_scraping.web_scraper import get_data_from_web
 
@@ -20,16 +22,11 @@ Plant Diseases, Garden Pests, and Possible Treatments [web]
 @ https://www.proflowers.com/
 """
 
-
-def get_urls(file: str) -> list:
-    with open(file, 'r') as f:
-        return [line.strip('\n') for line in f.readlines()]
-
-
-DATABASE_DIR = r'D:\PyCharm Professional\Projects\HappyPlant\data\database'
-DATABASE_PATH = os.path.join(DATABASE_DIR, 'HappyPlantDatabase.xlsx')
-URL_PATH = os.path.join(DATABASE_DIR, r'disease_urls.txt')
-FONDATION_URL, PRO_FLOWERS_URL = get_urls(URL_PATH)[:2]
+# Load environmental variables
+load_dotenv(r'D:\PyCharm Professional\Projects\HappyPlant\.env')
+DATABASE_PATH = os.getenv('DATABASE_PATH')
+EXPORT_DIR = os.getenv('EXPORT_DIR')
+FONDATION_URL, PRO_FLOWERS_URL = (os.getenv(k) for k in ['FONDATION_URL', 'PRO_FLOWERS_URL'])
 
 
 def find_words(line: str) -> list:
@@ -56,11 +53,10 @@ def extract_keywords(text: str) -> Union[list, np.ndarray]:
 
 
 def get_output_path():
-    output_folder = r'D:\PyCharm Professional\Projects\HappyPlant\data\export'
-    if not os.path.isdir(output_folder):
-        os.mkdir(output_folder)
+    if not os.path.isdir(EXPORT_DIR):
+        os.mkdir(EXPORT_DIR)
     file_name = f"happy_plant_disease_queries_{datetime.strftime(datetime.now(), '%Y%m%d%H%M')}.xlsx"
-    return os.path.join(output_folder, file_name)
+    return os.path.join(EXPORT_DIR, file_name)
 
 
 def get_matches(df: pd.DataFrame, keywords: list) -> pd.Series:
@@ -83,14 +79,26 @@ def concat_cells(x: str) -> str:
 
 
 def get_database(load_from_database: bool = True, save: bool = False) -> pd.DataFrame:
-    if load_from_database:
-        return pd.read_excel(DATABASE_PATH)
-    df_from_web = get_data_from_web(FONDATION_URL)
-    df_from_image = get_data_from_image(PRO_FLOWERS_URL)
-    database = pd.concat([df_from_image, df_from_web]).groupby('Disease').agg(lambda x: concat_cells(x)).reset_index()
-    if save:
-        database.to_excel(DATABASE_PATH, index=False, engine='xlsxwriter')
-    return database
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        if load_from_database:
+            # return pd.read_excel(DATABASE_PATH)
+            return pd.read_sql(
+                sql="SELECT * FROM plant_diseases",
+                con=connection
+            )
+        df_from_web = get_data_from_web(FONDATION_URL)
+        df_from_image = get_data_from_image(PRO_FLOWERS_URL)
+        database = pd.concat(
+            objs=[df_from_image, df_from_web]
+        ).groupby('Disease').agg(lambda x: concat_cells(x)).reset_index()
+        if save:
+            database.to_sql(
+                name='plant_diseases',
+                con=connection,
+                index=False,
+                if_exists='replace'
+            )
+        return database
 
 
 def disease_description(query: str, is_predicted: bool = False) -> NoReturn:
@@ -112,7 +120,7 @@ def disease_description(query: str, is_predicted: bool = False) -> NoReturn:
         for i, disease in enumerate(diseases, start=1):
             row = data.loc[data['Disease'] == disease].reset_index(inplace=False)
             print(
-                f"\n\t[{'Prediction' if is_predicted else i} 💮] "
+                f"\n\t[💮 {'Prediction' if is_predicted else i}] "
                 + f'Potential disease, accompanying symptoms, possible reasons and appropriate treatment hints:\n'
                 + f'\n\t\t[🦠] The plant disease indicated by the provided keywords is most likely:\n'
                 + f'\t\t{format_text(disease, indent=2)}.\n'
@@ -160,6 +168,7 @@ def plant_disease_recognition() -> NoReturn:
         elif choice == 2:
             i_happy_plant = IHappyPlant()
             user_input = input('[🌱] Please provide path to the image presenting pathological leaf: ')
+            print("[⏳] Droplets 'plinking' sound is our iHappyPlant making predictions ...")
             y_pred = i_happy_plant.predict_disease(user_input)
             if re.match('Healthy', y_pred, re.IGNORECASE):
                 print(f"\n\t[🍒] It seems like your plant is fit as a fiddle!")
@@ -171,7 +180,7 @@ def plant_disease_recognition() -> NoReturn:
                 disease_description(y_pred, is_predicted=True)
     except (ValueError, IndexError, UnidentifiedImageError, OSError) as err:
         print(
-            f'\n[❌] Wrong input provided: {err}\n'
+            f'\n\n[❌] Wrong input provided: {err}\n'
             f'[🍁] We hope your plant is safe and sound!'
         )
     finally:
